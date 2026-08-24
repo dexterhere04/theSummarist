@@ -7,7 +7,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_owned_document, get_owned_summary
@@ -369,8 +369,11 @@ async def delete_summary(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
+    """Permanently remove the summary and its related jobs / share tokens."""
     s = await get_owned_summary(summary_id, user, db)
-    s.deleted_at = utcnow()
+    await db.execute(delete(Job).where(Job.summary_id == s.id))
+    await db.execute(delete(ShareToken).where(ShareToken.summary_id == s.id))
+    await db.delete(s)
     await db.commit()
     return Response(status_code=204)
 

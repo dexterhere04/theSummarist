@@ -219,3 +219,15 @@ async def test_delete_summary(client, auth_headers):
     assert res.status_code == 204
     res = await client.get(f"/api/v1/summaries/{created['id']}", headers=auth_headers)
     assert res.status_code == 404
+
+    # Hard delete: the row must be gone from the database entirely.
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models import Summary as SummaryModel
+
+    async with SessionLocal() as session:
+        row = await session.scalar(
+            select(SummaryModel).where(SummaryModel.id == created["id"])
+        )
+        assert row is None

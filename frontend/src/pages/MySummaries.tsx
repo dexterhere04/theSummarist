@@ -37,6 +37,22 @@ export function MySummaries({
       .finally(() => setLoading(false))
   }, [tab, q])
 
+  const remove = async (id: string): Promise<void> => {
+    if (
+      !window.confirm(
+        'Permanently delete this summary and its share links? This cannot be undone.',
+      )
+    ) {
+      return
+    }
+    try {
+      await api.deleteSummary(id)
+      setItems((prev) => prev.filter((s) => s.id !== id))
+    } catch {
+      /* leave the card in place on failure */
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl px-4 md:px-8 py-10 md:py-12">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-1">
@@ -90,38 +106,50 @@ export function MySummaries({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {items.map((s, i) => (
-            <Link
+            <div
               key={s.id}
-              to={`/summary/${s.id}`}
-              className="group relative border border-line bg-surface-lowest hover:border-accent hover:shadow-raised transition-all flex flex-col reveal"
+              className="group relative flex flex-col reveal"
               style={delay(i)}
             >
-              <div className="h-[3px] bg-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="p-5 flex flex-col flex-1">
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-[4px] bg-surface-low text-accent grid place-items-center shrink-0">
-                    <Icon name="description" className="text-[20px]" />
+              <Link
+                to={`/summary/${s.id}`}
+                className="border border-line bg-surface-lowest hover:border-accent hover:shadow-raised transition-all flex flex-col flex-1"
+              >
+                <div className="h-[3px] bg-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="p-5 flex flex-col flex-1">
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-[4px] bg-surface-low text-accent grid place-items-center shrink-0">
+                      <Icon name="description" className="text-[20px]" />
+                    </div>
+                    <div className="min-w-0 pr-8">
+                      <h3 className="font-display font-semibold text-[16px] leading-snug text-ink line-clamp-1 group-hover:text-accent transition-colors">
+                        {s.title}
+                      </h3>
+                      <p className="font-mono text-[11px] text-ink-muted mt-1">
+                        {s.format} · {s.pages ?? '—'} pp. · {s.date}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <h3 className="font-display font-semibold text-[16px] leading-snug text-ink line-clamp-1 group-hover:text-accent transition-colors">
-                      {s.title}
-                    </h3>
-                    <p className="font-mono text-[11px] text-ink-muted mt-1">
-                      {s.format} · {s.pages ?? '—'} pp. · {s.date}
-                    </p>
+
+                  <p className="text-[14px] text-ink-variant leading-relaxed line-clamp-3 flex-1">
+                    {s.excerpt || s.tldr}
+                  </p>
+
+                  <div className="flex gap-1.5 mt-5 pt-4 border-t border-line">
+                    <Chip tone="accent">{s.category}</Chip>
+                    <Chip>{s.kind}</Chip>
                   </div>
                 </div>
-
-                <p className="text-[14px] text-ink-variant leading-relaxed line-clamp-3 flex-1">
-                  {s.excerpt || s.tldr}
-                </p>
-
-                <div className="flex gap-1.5 mt-5 pt-4 border-t border-line">
-                  <Chip tone="accent">{s.category}</Chip>
-                  <Chip>{s.kind}</Chip>
-                </div>
-              </div>
-            </Link>
+              </Link>
+              <button
+                type="button"
+                title="Delete permanently"
+                onClick={() => void remove(s.id)}
+                className="absolute top-4 right-4 w-8 h-8 rounded-[3px] grid place-items-center bg-surface-lowest border border-line text-ink-muted opacity-0 focus:opacity-100 group-hover:opacity-100 hover:border-error/40 hover:bg-error-soft hover:text-error transition-all"
+              >
+                <Icon name="delete" className="text-[17px]" />
+              </button>
+            </div>
           ))}
         </div>
       )}

@@ -57,6 +57,22 @@ export function Summary(): JSX.Element {
     setTimeout(() => setShareUrl(null), 2500)
   }
 
+  const remove = async (): Promise<void> => {
+    if (
+      !window.confirm(
+        'Permanently delete this summary and its share links? This cannot be undone.',
+      )
+    ) {
+      return
+    }
+    try {
+      await api.deleteSummary(id)
+      navigate('/summaries', { replace: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
   if (error) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 text-center">
@@ -108,16 +124,19 @@ export function Summary(): JSX.Element {
                     onClick: () => void toggleFavorite(),
                   },
                   { icon: 'share', label: 'Share', onClick: () => void share() },
+                  { icon: 'delete', label: 'Delete permanently', onClick: () => void remove() },
                 ].map((a) => (
                   <button
                     key={a.label}
                     type="button"
                     title={a.label}
                     onClick={a.onClick}
-                    className={`w-9 h-9 rounded-[3px] grid place-items-center hover:bg-surface-container transition-colors ${
-                      a.icon === 'bookmark' && summary.favorite
-                        ? 'text-accent'
-                        : 'text-ink-variant hover:text-accent'
+                    className={`w-9 h-9 rounded-[3px] grid place-items-center transition-colors ${
+                      a.icon === 'delete'
+                        ? 'text-ink-variant hover:bg-error-soft hover:text-error'
+                        : a.icon === 'bookmark' && summary.favorite
+                          ? 'text-accent'
+                          : 'text-ink-variant hover:bg-surface-container hover:text-accent'
                     }`}
                   >
                     <Icon name={a.icon} className="text-[19px]" />
