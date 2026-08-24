@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { NavLink } from 'react-router-dom'
+import { api } from '../lib/api'
+import type { User } from '../lib/types'
 import { Icon } from './Icon'
 
 const primaryNav = [
@@ -51,6 +54,12 @@ function NavItem({
 }
 
 export function Sidebar(): JSX.Element {
+  const [user, setUser] = useState<User | null>(null)
+
+  useEffect(() => {
+    api.me().then(setUser).catch(() => setUser(null))
+  }, [])
+
   return (
     <aside className="hidden md:flex flex-col w-[248px] shrink-0 border-r border-line bg-surface h-screen sticky top-0">
       <div className="px-5 h-[68px] border-b border-line flex items-center gap-3">
@@ -92,12 +101,12 @@ export function Sidebar(): JSX.Element {
       <div className="p-3 border-t border-line">
         <div className="flex items-center gap-3 rounded px-2 py-2">
           <div className="w-9 h-9 rounded-[4px] bg-surface-container text-accent grid place-items-center font-display font-semibold text-sm">
-            D
+            {user?.avatar_initials ?? '·'}
           </div>
           <div className="min-w-0 leading-tight">
-            <div className="text-[13.5px] font-medium truncate">Dexter</div>
+            <div className="text-[13.5px] font-medium truncate">{user?.name ?? '…'}</div>
             <div className="font-mono text-[11px] text-ink-muted truncate">
-              dexter@summarist.ai
+              {user?.email ?? ''}
             </div>
           </div>
         </div>

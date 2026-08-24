@@ -1,15 +1,80 @@
+import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { useParams, Navigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
+import { api, downloadFile } from '../lib/api'
+import type { AudioResponse, SummaryItem as SummaryData } from '../lib/types'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
-import { summaries } from '../lib/data'
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
 
 export function Summary(): JSX.Element {
-  const { id } = useParams()
-  const summary = summaries.find((s) => s.id === id)
+  const { id = '' } = useParams()
+  const navigate = useNavigate()
+  const [summary, setSummary] = useState<SummaryData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [audio, setAudio] = useState<AudioResponse | null>(null)
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
 
-  if (!summary) return <Navigate to="/summaries" replace />
+  useEffect(() => {
+    api
+      .getSummary(id)
+      .then(setSummary)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Summary not found'))
+  }, [id])
+
+  useEffect(() => {
+    if (!summary) return
+    api
+      .audio(id)
+      .then((a) => setAudio(a))
+      .catch(() => setAudio(null))
+  }, [id, summary])
+
+  const regenerate = async (): Promise<void> => {
+    try {
+      const { job } = await api.regenerateSummary(id)
+      navigate('/processing', { state: { jobId: job.id } })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Regeneration failed')
+    }
+  }
+
+  const toggleFavorite = async (): Promise<void> => {
+    const res = await api.toggleFavorite(id)
+    setSummary((s) => (s ? { ...s, favorite: res.favorite } : s))
+  }
+
+  const share = async (): Promise<void> => {
+    const res = await api.shareSummary(id)
+    setShareUrl(res.share_url)
+    await navigator.clipboard.writeText(res.share_url).catch(() => undefined)
+    setTimeout(() => setShareUrl(null), 2500)
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-24 text-center">
+        <h1 className="font-display text-2xl font-semibold text-ink">{error}</h1>
+        <Button className="mt-6" variant="secondary" onClick={() => navigate('/summaries')}>
+          Back to library
+        </Button>
+      </div>
+    )
+  }
+
+  if (!summary) {
+    return (
+      <div className="py-24 text-center">
+        <Icon name="sync" className="text-[32px] text-accent animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-[1240px] px-4 md:px-8 py-6 md:py-8">
@@ -27,22 +92,43 @@ export function Summary(): JSX.Element {
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {[
-                  { icon: 'refresh', label: 'Regenerate' },
-                  { icon: 'download', label: 'Download' },
-                  { icon: 'bookmark_border', label: 'Favorite' },
-                  { icon: 'share', label: 'Share' },
+                  { icon: 'refresh', label: 'Regenerate', onClick: () => void regenerate() },
+                  {
+                    icon: 'download',
+                    label: 'Download (markdown)',
+                    onClick: () =>
+                      void downloadFile(
+                        `/summaries/${id}/download?format=markdown`,
+                        `${summary.id}.md`,
+                      ),
+                  },
+                  {
+                    icon: summary.favorite ? 'bookmark' : 'bookmark_border',
+                    label: 'Favorite',
+                    onClick: () => void toggleFavorite(),
+                  },
+                  { icon: 'share', label: 'Share', onClick: () => void share() },
                 ].map((a) => (
                   <button
                     key={a.label}
                     type="button"
                     title={a.label}
-                    className="w-9 h-9 rounded-[3px] grid place-items-center text-ink-variant hover:bg-surface-container hover:text-accent transition-colors"
+                    onClick={a.onClick}
+                    className={`w-9 h-9 rounded-[3px] grid place-items-center hover:bg-surface-container transition-colors ${
+                      a.icon === 'bookmark' && summary.favorite
+                        ? 'text-accent'
+                        : 'text-ink-variant hover:text-accent'
+                    }`}
                   >
                     <Icon name={a.icon} className="text-[19px]" />
                   </button>
                 ))}
               </div>
             </div>
+
+            {shareUrl && (
+              <p className="mt-3 text-[13px] text-ok break-all">Link copied: {shareUrl}</p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2.5 mt-5">
               <Chip>{summary.length} Length</Chip>
@@ -51,7 +137,7 @@ export function Summary(): JSX.Element {
               <span className="text-line">·</span>
               <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-variant">
                 <Icon name="schedule" className="text-[14px]" />
-                Generated just now
+                {summary.date}
               </span>
             </div>
           </div>
@@ -67,35 +153,35 @@ export function Summary(): JSX.Element {
                 </h2>
               </div>
               <p className="mt-4 text-[17px] md:text-[17.5px] leading-[1.7] text-ink dropcap max-w-[70ch]">
-                {summary.tldr}
+                {summary.tldr || 'Generating…'}
               </p>
             </div>
 
-            <div className="px-6 md:px-8 py-7">
-              <h2 className="font-display font-semibold text-[20px] text-ink">
-                Key Takeaways
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-5">
-                {summary.takeaways.map((t, i) => (
-                  <div
-                    key={t.title}
-                    className="border border-line p-4 bg-surface-lowest hover:border-line-strong transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="w-7 h-7 rounded-[3px] bg-accent text-surface-lowest grid place-items-center font-mono text-[12px] font-semibold">
-                        {String(i + 1).padStart(2, '0')}
-                      </span>
-                      <h3 className="text-[16px] font-semibold text-ink">
-                        {t.title}
-                      </h3>
+            {summary.takeaways.length > 0 && (
+              <div className="px-6 md:px-8 py-7">
+                <h2 className="font-display font-semibold text-[20px] text-ink">
+                  Key Takeaways
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-5">
+                  {summary.takeaways.map((t, i) => (
+                    <div
+                      key={`${t.title}-${i}`}
+                      className="border border-line p-4 bg-surface-lowest hover:border-line-strong transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="w-7 h-7 rounded-[3px] bg-accent text-surface-lowest grid place-items-center font-mono text-[12px] font-semibold">
+                          {String(i + 1).padStart(2, '0')}
+                        </span>
+                        <h3 className="text-[16px] font-semibold text-ink">{t.title}</h3>
+                      </div>
+                      <p className="mt-3 text-[15.5px] leading-[1.65] text-ink-variant">
+                        {t.body}
+                      </p>
                     </div>
-                    <p className="mt-3 text-[15.5px] leading-[1.65] text-ink-variant">
-                      {t.body}
-                    </p>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="px-6 md:px-8 py-7 border-t border-line">
               <h2 className="font-display font-semibold text-[20px] text-ink">
@@ -103,13 +189,11 @@ export function Summary(): JSX.Element {
               </h2>
               <div className="mt-6 space-y-8">
                 {summary.sections.map((s, i) => (
-                  <div key={s.heading} className="max-w-[70ch]">
+                  <div key={`${s.heading}-${i}`} className="max-w-[70ch]">
                     <h3 className="font-mono text-[13px] uppercase tracking-[0.14em] text-ink-variant">
                       {String(i + 1).padStart(2, '0')}. {s.heading}
                     </h3>
-                    <p className="mt-2.5 text-[17px] leading-[1.75] text-ink">
-                      {s.body}
-                    </p>
+                    <p className="mt-2.5 text-[17px] leading-[1.75] text-ink">{s.body}</p>
                   </div>
                 ))}
               </div>
@@ -123,25 +207,24 @@ export function Summary(): JSX.Element {
             <div className="flex items-center gap-3.5">
               <button
                 type="button"
+                title={audio ? `Listen (${audio.voice})` : 'Audio unavailable'}
                 className="w-11 h-11 rounded-[3px] bg-accent text-surface-lowest grid place-items-center hover:bg-accent-strong transition-colors shrink-0"
               >
                 <Icon name="play_arrow" className="text-[24px]" />
               </button>
               <div className="flex-1 min-w-0">
                 <div className="flex items-end gap-[3px] h-8">
-                  {[4, 8, 3, 7, 5, 2, 6, 4, 2, 5, 3, 7, 4, 6, 2, 5].map(
-                    (h, i) => (
-                      <div
-                        key={i}
-                        className="w-[3px] rounded-full bg-accent/50"
-                        style={{ height: `${h * 4}px` }}
-                      />
-                    ),
-                  )}
+                  {[4, 8, 3, 7, 5, 2, 6, 4, 2, 5, 3, 7, 4, 6, 2, 5].map((h, i) => (
+                    <div
+                      key={i}
+                      className="w-[3px] rounded-full bg-accent/50"
+                      style={{ height: `${h * 4}px` }}
+                    />
+                  ))}
                 </div>
                 <div className="flex justify-between font-mono text-[11px] text-ink-muted mt-2">
                   <span>0:00</span>
-                  <span>2:15</span>
+                  <span>{audio ? formatDuration(audio.duration_seconds) : '--:--'}</span>
                 </div>
               </div>
             </div>
@@ -158,23 +241,30 @@ export function Summary(): JSX.Element {
                   {summary.source}
                 </div>
                 <div className="text-[12px] text-ink-muted mt-0.5">
-                  {summary.pages} pp. · {summary.words.toLocaleString()} words
+                  {summary.pages ?? '—'} pp. · {(summary.words ?? 0).toLocaleString()} words
                 </div>
               </div>
             </div>
-            <Button variant="secondary" size="sm" className="w-full mt-4">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full mt-4"
+              onClick={() => navigate(`/document/${summary.document_id}`)}
+            >
               View extracted text
             </Button>
           </div>
 
-          <div className="border border-line bg-surface-lowest p-5">
-            <h3 className="eyebrow text-ink-muted mb-3">Notable Quote</h3>
-            <blockquote className="ai-highlight px-4 py-3">
-              <p className="text-[14.5px] leading-relaxed text-ink italic">
-                &ldquo;{summary.highlight}&rdquo;
-              </p>
-            </blockquote>
-          </div>
+          {summary.highlight && (
+            <div className="border border-line bg-surface-lowest p-5">
+              <h3 className="eyebrow text-ink-muted mb-3">Notable Quote</h3>
+              <blockquote className="ai-highlight px-4 py-3">
+                <p className="text-[14.5px] leading-relaxed text-ink italic">
+                  &ldquo;{summary.highlight}&rdquo;
+                </p>
+              </blockquote>
+            </div>
+          )}
         </aside>
       </div>
     </div>

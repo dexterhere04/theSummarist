@@ -1,10 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { useNavigate } from 'react-router-dom'
+import {
+  Navigate,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom'
+import { api } from '../lib/api'
+import type {
+  DetailLevel,
+  ExtractedText as ExtractedTextData,
+  SummaryFormat,
+  SummaryLength,
+  SummaryStyle,
+} from '../lib/types'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 
-const styles = [
+const styles: { value: SummaryStyle; label: string; icon: string; desc: string }[] = [
   {
     value: 'executive',
     label: 'Executive Summary',
@@ -37,14 +50,74 @@ const styles = [
   },
 ]
 
-const lengths = ['Short', 'Medium', 'Long']
+const lengths: SummaryLength[] = ['Short', 'Medium', 'Long']
+
+interface ConfigureState {
+  documentId: string
+  format: SummaryFormat
+  detail: DetailLevel
+}
 
 export function ConfigureSummary(): JSX.Element {
   const navigate = useNavigate()
-  const [length, setLength] = useState('Short')
-  const [style, setStyle] = useState('executive')
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const state = location.state as ConfigureState | null
+  const documentId = state?.documentId ?? searchParams.get('doc') ?? ''
+  const format: SummaryFormat = state?.format ?? 'bullets'
+  const detail: DetailLevel = state?.detail ?? 'concise'
+
+  const [length, setLength] = useState<SummaryLength>('Short')
+  const [style, setStyle] = useState<SummaryStyle>('executive')
   const [includePoints, setIncludePoints] = useState(true)
   const [includeQuotes, setIncludeQuotes] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [text, setText] = useState<ExtractedTextData | null>(null)
+  const [textError, setTextError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!documentId) return
+    let alive = true
+    api
+      .extractedText(documentId)
+      .then((t) => {
+        if (alive) setText(t)
+      })
+      .catch((e) => {
+        if (alive)
+          setTextError(
+            e instanceof Error ? e.message : 'Failed to load extracted text',
+          )
+      })
+    return () => {
+      alive = false
+    }
+  }, [documentId])
+
+  if (!documentId) return <Navigate to="/" replace />
+
+  const generate = async (): Promise<void> => {
+    setGenerating(true)
+    setError(null)
+    try {
+      const { job } = await api.createSummary({
+        document_id: documentId,
+        length,
+        style,
+        format,
+        detail_level: detail,
+        include_key_points: includePoints,
+        include_quotes: includeQuotes,
+      })
+      navigate('/processing', { state: { jobId: job.id } })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start generation')
+      setGenerating(false)
+    }
+  }
+
+  const currentText = text && text.document_id === documentId ? text : null
 
   return (
     <div className="mx-auto max-w-[800px] px-4 md:px-8 py-8 md:py-12">
@@ -59,11 +132,76 @@ export function ConfigureSummary(): JSX.Element {
           </p>
         </header>
 
+        <section className="px-6 md:px-8 py-7 border-b border-line">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 className="font-display text-xl font-semibold text-ink">Extracted Text</h2>
+            {currentText && (
+              <span className="font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                {(currentText.words ?? 0).toLocaleString()} words
+                {currentText.pages != null ? ` · ${currentText.pages} pages` : ''}
+                {currentText.language ? ` · ${currentText.language}` : ''}
+              </span>
+            )}
+          </div>
+          {textError && !currentText ? (
+            <p className="border border-line bg-surface-low p-4 text-[13px] text-error">
+              {textError}
+            </p>
+          ) : !currentText ? (
+            <div className="border border-line bg-surface-low p-8 grid place-items-center">
+              <Icon name="sync" className="text-[22px] text-accent animate-spin" />
+            </div>
+          ) : (
+            <div className="border border-line bg-surface-lowest max-h-[340px] overflow-y-auto px-6 md:px-8 py-5">
+              <p className="text-[13px] font-medium text-ink-variant truncate mb-4">
+                {currentText.file_name}
+              </p>
+              <article className="max-w-[640px]">
+                <h3 className="font-display text-lg font-semibold tracking-tight text-ink leading-snug">
+                  {currentText.title}
+                </h3>
+                <div className="rule-thick-thin my-4" />
+                <div className="space-y-6">
+                  {currentText.body.map((section, si) => (
+                    <div key={`${section.heading}-${si}`}>
+                      <h4 className="font-display text-[15px] font-semibold text-ink mb-3">
+                        {section.heading}
+                      </h4>
+                      <div className="space-y-3.5">
+                        {section.paragraphs.map((p, i) => (
+                          <p
+                            key={i}
+                            className="text-[14px] leading-[1.7] text-ink-variant"
+                          >
+                            {p}
+                          </p>
+                        ))}
+                        {section.bullets && section.bullets.length > 0 && (
+                          <ul className="space-y-2.5 pl-1">
+                            {section.bullets.map((b, i) => (
+                              <li key={i} className="flex items-start gap-2.5">
+                                <span className="font-mono text-[11px] text-accent mt-[4px] shrink-0">
+                                  §
+                                </span>
+                                <span className="text-[14px] leading-[1.65] text-ink-variant">
+                                  {b}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </div>
+          )}
+        </section>
+
         <div className="px-6 md:px-8 py-7">
           <section className="mb-9">
-            <h2 className="font-display text-xl font-semibold text-ink mb-4">
-              Length
-            </h2>
+            <h2 className="font-display text-xl font-semibold text-ink mb-4">Length</h2>
             <div className="inline-flex border border-line-strong">
               {lengths.map((l) => (
                 <button
@@ -83,9 +221,7 @@ export function ConfigureSummary(): JSX.Element {
           </section>
 
           <section className="mb-9">
-            <h2 className="font-display text-xl font-semibold text-ink mb-4">
-              Style
-            </h2>
+            <h2 className="font-display text-xl font-semibold text-ink mb-4">Style</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {styles.map((s) => (
                 <button
@@ -102,18 +238,12 @@ export function ConfigureSummary(): JSX.Element {
                     <Icon name={s.icon} className="text-accent text-[22px]" />
                     <span
                       className={`w-4 h-4 rounded-full border-2 ${
-                        style === s.value
-                          ? 'border-accent border-[5px]'
-                          : 'border-line-strong'
+                        style === s.value ? 'border-accent border-[5px]' : 'border-line-strong'
                       }`}
                     />
                   </div>
-                  <h3 className="mt-3 text-[13.5px] font-medium text-ink">
-                    {s.label}
-                  </h3>
-                  <p className="mt-1 text-[12.5px] text-ink-variant leading-snug">
-                    {s.desc}
-                  </p>
+                  <h3 className="mt-3 text-[13.5px] font-medium text-ink">{s.label}</h3>
+                  <p className="mt-1 text-[12.5px] text-ink-variant leading-snug">{s.desc}</p>
                 </button>
               ))}
             </div>
@@ -126,9 +256,7 @@ export function ConfigureSummary(): JSX.Element {
             <div className="border border-line bg-surface-low p-5 space-y-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-[14px] font-medium text-ink">
-                    Include key points
-                  </div>
+                  <div className="text-[14px] font-medium text-ink">Include key points</div>
                   <div className="text-[12.5px] text-ink-variant">
                     Append a concise list to the end.
                   </div>
@@ -149,17 +277,16 @@ export function ConfigureSummary(): JSX.Element {
               </div>
             </div>
           </section>
+
+          {error && <p className="mt-4 text-[13px] text-error">{error}</p>}
         </div>
 
         <footer className="px-6 md:px-8 py-5 border-t border-line flex justify-end items-center gap-3">
           <Button variant="ghost" onClick={() => navigate('/summaries')}>
             Cancel
           </Button>
-          <Button
-            icon="auto_awesome"
-            onClick={() => navigate('/summary/annual-financial-report')}
-          >
-            Generate Summary
+          <Button icon="auto_awesome" disabled={generating} onClick={() => void generate()}>
+            {generating ? 'Starting…' : 'Generate Summary'}
           </Button>
         </footer>
       </div>

@@ -1,15 +1,54 @@
-import type { CSSProperties, JSX } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, DragEvent, JSX } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { api } from '../lib/api'
+import type { SummaryItem } from '../lib/types'
 import { Button } from '../components/Button'
 import { FormatBadge } from '../components/FormatBadge'
 import { Icon } from '../components/Icon'
-import { summaries } from '../lib/data'
 
 const delay = (i: number): CSSProperties => ({ ['--reveal-delay' as string]: `${i * 90}ms` })
 
 export function Dashboard(): JSX.Element {
+  const navigate = useNavigate()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [recent, setRecent] = useState<SummaryItem[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api
+      .listSummaries({ tab: 'recent', per_page: 3 })
+      .then((page) => setRecent(page.items))
+      .catch(() => setRecent([]))
+  }, [])
+
+  const upload = async (file: File | undefined | null): Promise<void> => {
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    try {
+      const { job } = await api.upload(file, false)
+      navigate('/processing', { state: { jobId: job.id } })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-4 md:px-8 py-10 md:py-14">
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.pptx,.txt"
+        className="hidden"
+        onChange={(e) => {
+          void upload(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+
       <section className="mb-12 md:text-left text-center">
         <div className="flex flex-col md:flex-row md:items-end items-center justify-between gap-6">
           <div>
@@ -17,7 +56,7 @@ export function Dashboard(): JSX.Element {
               className="font-display text-4xl md:text-[52px] font-semibold tracking-tight text-ink leading-[1.02] mt-3 reveal"
               style={delay(1)}
             >
-              Welcome to 
+              Welcome to
               <br />
               <span className="italic text-accent-strong">The Summarist</span>
             </h1>
@@ -51,9 +90,9 @@ export function Dashboard(): JSX.Element {
           className="mt-7 flex flex-wrap gap-3 md:justify-start justify-center reveal"
           style={delay(3)}
         >
-          <Link to="/document/annual-financial-report">
-            <Button icon="add">New Summary</Button>
-          </Link>
+          <Button icon="add" onClick={() => fileInput.current?.click()}>
+            New Summary
+          </Button>
           <Link to="/summaries">
             <Button variant="secondary" icon="grid_view">
               Browse the Library
@@ -63,17 +102,27 @@ export function Dashboard(): JSX.Element {
       </section>
 
       <section className="mb-12 reveal" style={delay(4)}>
-        <Link to="/document/annual-financial-report" className="block group">
-          <div className="relative border border-line-strong bg-surface-lowest hover:border-accent transition-colors p-10 md:p-14 flex flex-col items-center text-center">
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => fileInput.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e: DragEvent<HTMLButtonElement>) => {
+            e.preventDefault()
+            void upload(e.dataTransfer.files?.[0])
+          }}
+          className="w-full block group cursor-pointer disabled:opacity-60"
+        >
+          <div className="relative border border-dashed border-line-strong bg-surface-lowest hover:border-accent transition-colors p-10 md:p-14 flex flex-col items-center text-center">
             <span className="absolute top-3 left-3 w-3 h-3 border-t border-l border-ink/40" />
             <span className="absolute top-3 right-3 w-3 h-3 border-t border-r border-ink/40" />
             <span className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-ink/40" />
             <span className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-ink/40" />
             <div className="w-16 h-16 rounded-[4px] bg-surface-low text-accent grid place-items-center mb-6 group-hover:bg-accent group-hover:text-surface-lowest transition-colors">
-              <Icon name="cloud_upload" className="text-[26px]" />
+              <Icon name={uploading ? 'sync' : 'cloud_upload'} className={`text-[26px] ${uploading ? 'animate-spin' : ''}`} />
             </div>
             <h2 className="font-display text-2xl font-semibold text-ink">
-              Drop a document here
+              {uploading ? 'Uploading…' : 'Drop a document here'}
             </h2>
             <p className="mt-1.5 text-[15px] text-ink-variant">
               PDF, PNG, JPG or JPEG — up to 50 MB
@@ -82,7 +131,10 @@ export function Dashboard(): JSX.Element {
               Choose File
             </span>
           </div>
-        </Link>
+        </button>
+        {error && (
+          <p className="mt-3 text-[13px] text-error text-center">{error}</p>
+        )}
       </section>
 
       <section className="reveal" style={delay(5)}>
@@ -99,33 +151,39 @@ export function Dashboard(): JSX.Element {
         </div>
         <div className="rule-thick-thin mt-2 mb-2" />
 
-        <div className="flex flex-col">
-          {summaries.slice(0, 3).map((s, i) => (
-            <Link
-              key={s.id}
-              to={`/summary/${s.id}`}
-              className={`group flex items-center gap-4 px-2 py-4 hover:bg-surface-lowest transition-colors ${
-                i < 2 ? 'border-b border-line' : ''
-              }`}
-            >
-              <span className="font-mono text-[12px] text-ink-muted w-6 shrink-0">
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <FormatBadge format={s.format} />
-              <div className="flex-1 min-w-0">
-                <h3 className="text-[15.5px] font-medium text-ink truncate group-hover:text-accent transition-colors">
-                  {s.title}
-                </h3>
-                <p className="text-[13.5px] text-ink-variant truncate">
-                  {s.excerpt}
-                </p>
-              </div>
-              <span className="font-mono text-[11.5px] text-ink-muted whitespace-nowrap hidden sm:block">
-                {s.date}
-              </span>
-            </Link>
-          ))}
-        </div>
+        {recent.length === 0 ? (
+          <p className="py-8 text-[14px] text-ink-muted text-center">
+            No summaries yet — upload a document to get started.
+          </p>
+        ) : (
+          <div className="flex flex-col">
+            {recent.map((s, i) => (
+              <Link
+                key={s.id}
+                to={`/summary/${s.id}`}
+                className={`group flex items-center gap-4 px-2 py-4 hover:bg-surface-lowest transition-colors ${
+                  i < recent.length - 1 ? 'border-b border-line' : ''
+                }`}
+              >
+                <span className="font-mono text-[12px] text-ink-muted w-6 shrink-0">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <FormatBadge format={s.format} />
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[15.5px] font-medium text-ink truncate group-hover:text-accent transition-colors">
+                    {s.title}
+                  </h3>
+                  <p className="text-[13.5px] text-ink-variant truncate">
+                    {s.excerpt || s.tldr}
+                  </p>
+                </div>
+                <span className="font-mono text-[11.5px] text-ink-muted whitespace-nowrap hidden sm:block">
+                  {s.date}
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )
